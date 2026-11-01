@@ -13,6 +13,30 @@ let activeDepositCode = null;
 let depositSuccessShown = false;
 
 const money = value => new Intl.NumberFormat("vi-VN").format(Number(value) || 0) + "đ";
+
+// Chuyển trạng thái hệ thống sang tiếng Việt trước khi hiển thị cho khách.
+function statusLabel(value) {
+  const raw = String(value ?? "").trim();
+  const key = raw.toLowerCase();
+  const labels = {
+    paid: "Đã thanh toán",
+    expired: "Hết hạn",
+    pending: "Chờ thanh toán",
+    completed: "Hoàn tất",
+    complete: "Hoàn tất",
+    success: "Thành công",
+    successful: "Thành công",
+    failed: "Thất bại",
+    cancelled: "Đã hủy",
+    canceled: "Đã hủy",
+    processing: "Đang xử lý",
+    refunded: "Đã hoàn tiền",
+    waiting: "Đang chờ xử lý",
+    active: "Đang hoạt động",
+    inactive: "Không hoạt động"
+  };
+  return labels[key] || raw || "Chưa xác định";
+}
 const getToken = () => localStorage.getItem(TOKEN_KEY);
 const setToken = token => token ? localStorage.setItem(TOKEN_KEY, token) : localStorage.removeItem(TOKEN_KEY);
 const escapeHTML = value => String(value ?? "").replace(/[&<>"']/g, ch => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[ch]));
@@ -116,7 +140,10 @@ async function apiRequest(path, options = {}) {
   }
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
-    if (response.status === 401 && getToken()) setToken(null);
+    if (response.status === 401 && getToken()) {
+      setToken(null);
+      updateAccountUI(null);
+    }
     const error = new Error(data.error || data.message || `Lỗi máy chủ (HTTP ${response.status})`);
     error.data = data;
     throw error;
@@ -174,10 +201,60 @@ function updateSharedHeader(user) {
 }
 
 /* Auth & Session */
+function stopDepositTimersAndResetGateway() {
+  clearInterval(depositCountdownTimer);
+  clearInterval(depositPollTimer);
+  depositCountdownTimer = null;
+  depositPollTimer = null;
+  activeDepositCode = null;
+  depositSuccessShown = false;
+  const gatewaySection = document.getElementById("deposit-gateway-section");
+  if (gatewaySection) {
+    gatewaySection.classList.add("hidden");
+    gatewaySection.innerHTML = "";
+  }
+}
+
+function updateDepositAuthUI(user) {
+  const isLoggedIn = !!(user && getToken());
+  document.documentElement.classList.toggle("has-token", isLoggedIn);
+  document.documentElement.classList.toggle("no-token", !isLoggedIn);
+
+  const guestPrompt = document.getElementById("deposit-guest-prompt");
+  const createSection = document.getElementById("deposit-create-section");
+  const gatewaySection = document.getElementById("deposit-gateway-section");
+  const historySection = document.getElementById("deposit-history-section");
+  const historyHost = document.getElementById("deposit-history");
+
+  if (!guestPrompt && !createSection && !historySection) return;
+
+  if (!isLoggedIn) {
+    stopDepositTimersAndResetGateway();
+    if (createSection) createSection.classList.add("hidden");
+    if (historySection) historySection.classList.add("hidden");
+    if (guestPrompt) guestPrompt.classList.remove("hidden");
+    if (historyHost) historyHost.innerHTML = "";
+    const form = document.getElementById("deposit-form");
+    if (form) form.reset();
+    document.querySelectorAll("[data-quick-amount]").forEach(b => b.classList.remove("active"));
+  } else {
+    if (guestPrompt) guestPrompt.classList.add("hidden");
+    if (historySection) historySection.classList.remove("hidden");
+    const hasActiveGateway = !!(activeDepositCode && gatewaySection && !gatewaySection.classList.contains("hidden"));
+    if (createSection) createSection.classList.toggle("hidden", hasActiveGateway);
+    if (gatewaySection && !hasActiveGateway) gatewaySection.classList.add("hidden");
+  }
+}
+
+function updateAccountPanel(user) {
+  renderAccountPanel(user);
+}
+
 function updateAccountUI(user) {
   currentUser = user || null;
   updateSharedHeader(currentUser);
   renderAccountPanel(currentUser);
+  updateDepositAuthUI(currentUser);
 }
 
 async function loadCurrentUser() {
@@ -285,7 +362,7 @@ async function handleLogin(event) {
     updateAccountUI(user);
     form.reset();
     await refreshPageData();
-    showCenterAlert(`Chào mừng ${user.username} đã quay trở lại!`, "success", "Đăng nhập thành công");
+    // Đăng nhập thành công: không hiển thị alert gây gián đoạn.
   } catch (error) {
     setToken(null);
     updateAccountUI(null);
@@ -298,10 +375,25 @@ async function handleLogin(event) {
 async function handleRegister(event) {
   event.preventDefault();
   const form = event.currentTarget;
-  const username = form.elements.username?.value.trim();
-  const password = form.elements.password?.value || "";
-  if (!username || username.length < 3 || password.length < 10) {
-    return showCenterAlert("Tên đăng nhập cần từ 3–40 ký tự và mật khẩu tối thiểu 10 ký tự.", "warning", "Thông tin chưa hợp lệ");
+  const username = String(form.elements.username?.value ?? "").trim();
+  const password = String(form.elements.password?.value ?? "");
+
+  // Kiểm tra riêng từng trường để người dùng nhận đúng thông báo.
+  // Chỉ chấp nhận chữ cái ASCII không dấu và chữ số; không dấu cách/ký tự đặc biệt.
+  if (!/^[A-Za-z0-9]{3,40}$/.test(username)) {
+    return showCenterAlert(
+      "Tài khoản không hợp lệ vui lòng đăng ký tên đăng nhập không dùng ký tự đặc biệt, viết có dấu. Mẫu minh họa hợp lệ: Random5s",
+      "warning",
+      "Tài khoản không hợp lệ"
+    );
+  }
+
+  if (password.length < 6) {
+    return showCenterAlert(
+      "Mật khẩu của bạn quá yếu vui lòng nhập mật khẩu 6 ký tự trở lên để bảo mật thông tin.",
+      "warning",
+      "Đăng ký thất bại"
+    );
   }
   const button = form.querySelector('[type="submit"]');
   const oldText = button?.innerHTML;
@@ -326,8 +418,13 @@ async function handleRegister(event) {
 }
 
 function logoutUser() {
+  stopDepositTimersAndResetGateway();
   setToken(null);
   updateAccountUI(null);
+  const accountDetails = document.getElementById("account-details");
+  if (accountDetails) accountDetails.innerHTML = "";
+  if (document.getElementById("history-content")) loadHistory();
+  if (document.getElementById("deposit-history")) loadDeposits();
   showToast("Đã đăng xuất");
 }
 
@@ -551,7 +648,12 @@ function openPurchaseDetails(order) {
 async function loadHistory() {
   const host = document.getElementById("history-content");
   if (!host) return;
-  if (!getToken()) {
+  const heading = document.getElementById("history-page-heading");
+  const securityNote = document.querySelector(".history-security-note");
+  const loggedIn = !!getToken();
+  heading?.classList.toggle("hidden", !loggedIn);
+  securityNote?.classList.toggle("hidden", !loggedIn);
+  if (!loggedIn) {
     host.innerHTML = '<div class="empty-state"><i class="fa-solid fa-lock"></i><h3>Bạn chưa đăng nhập</h3><p class="tiny">Vui lòng đăng nhập để xem các túi mù đã mở.</p><a class="btn btn-primary" style="margin-top:8px" href="account.html">Đăng nhập ngay</a></div>';
     return;
   }
@@ -563,7 +665,7 @@ async function loadHistory() {
       return;
     }
     host.innerHTML = `<div class="table-wrap"><table class="data-table"><thead><tr><th>Mã giao dịch</th><th>Gói sản phẩm</th><th>Số lượng</th><th>Thanh toán</th><th>Tài khoản nhận được</th><th>Trạng thái</th><th>Thời gian</th></tr></thead><tbody>${items.map(o => `
-      <tr><td><strong>#${Number(o.id)}</strong></td><td>${escapeHTML(o.package_name || `Gói #${Number(o.package_id)}`)}</td><td><strong>${Number(o.quantity || o.accounts?.length || 1)} acc</strong></td><td><strong class="history-amount">${money(o.amount)}</strong></td><td><button class="btn btn-soft btn-view-purchase" type="button" data-view-purchase="${escapeHTML(o.purchase_id || o.id)}"><i class="fa-regular fa-eye"></i> Xem chi tiết</button></td><td><span class="status">${escapeHTML(o.status || "completed")}</span></td><td class="muted">${escapeHTML(o.created_at || "")}</td></tr>`).join("")}</tbody></table></div>`;
+      <tr><td><strong>#${Number(o.id)}</strong></td><td>${escapeHTML(o.package_name || `Gói #${Number(o.package_id)}`)}</td><td><strong>${Number(o.quantity || o.accounts?.length || 1)} acc</strong></td><td><strong class="history-amount">${money(o.amount)}</strong></td><td><button class="btn btn-soft btn-view-purchase" type="button" data-view-purchase="${escapeHTML(o.purchase_id || o.id)}"><i class="fa-regular fa-eye"></i> Xem chi tiết</button></td><td><span class="status status-${escapeHTML(String(o.status || "completed").toLowerCase())}">${escapeHTML(statusLabel(o.status || "completed"))}</span></td><td class="muted">${escapeHTML(o.created_at || "")}</td></tr>`).join("")}</tbody></table></div>`;
     const byId = new Map(items.map(o => [String(o.purchase_id || o.id), o]));
     host.querySelectorAll("[data-view-purchase]").forEach(btn => btn.addEventListener("click", () => {
       const order = byId.get(btn.dataset.viewPurchase); if (order) openPurchaseDetails(order);
@@ -591,9 +693,17 @@ function startGatewayCountdown(seconds = 900) {
 }
 
 function showPaymentGatewayView(data) {
+  if (!getToken() || !currentUser) {
+    updateDepositAuthUI(null);
+    return;
+  }
+  const guestPrompt = document.getElementById("deposit-guest-prompt");
   const createSection = document.getElementById("deposit-create-section");
   const gatewaySection = document.getElementById("deposit-gateway-section");
+  const historySection = document.getElementById("deposit-history-section");
   if (!createSection || !gatewaySection) return;
+  if (guestPrompt) guestPrompt.classList.add("hidden");
+  if (historySection) historySection.classList.remove("hidden");
 
   clearInterval(depositPollTimer);
   activeDepositCode = getToken() ? String(data.payment_code || data.transfer_content || "") : null;
@@ -614,7 +724,7 @@ function showPaymentGatewayView(data) {
   gatewaySection.innerHTML = `
     <div class="gateway-card">
       <div class="gateway-header">
-        <h2 class="gateway-title">THANH TOÁN TỰ ĐỘNG</h2>
+        <h2 class="gateway-title">NẠP QUỸ SỐ DƯ</h2>
         <div class="gateway-status-badge">
           <span class="pulse-dot"></span>
           <span>Đang chờ thanh toán...</span>
@@ -642,7 +752,7 @@ function showPaymentGatewayView(data) {
         <!-- Right Bank Details Column -->
         <div class="gateway-info-col">
           <div class="gateway-bank-head">
-            <div class="gateway-bank-logo"><img src="https://cdn.tgdd.vn/GameApp/2/220769/Screentshots/mb-bank-ngan-hang-dien-tu-trong-tay-ban-logo-26-12-2023.png" alt="MB Bank"></div>
+            <div class="gateway-bank-logo"><img src="https://baobiasia.com/wp-content/uploads/2026/08/ngoi-sao-logo-mb-bank.jpg" alt="MB Bank"></div>
             <div>
               <h3>${escapeHTML(bankName)}</h3>
               <p>Chuyển khoản nhanh Napas 247 tự động</p>
@@ -736,25 +846,26 @@ function showPaymentGatewayView(data) {
   if (activeDepositCode) startDepositStatusPolling();
 }
 
+async function checkPayment() {
+  if (depositSuccessShown || !activeDepositCode || !getToken()) return;
+  try {
+    const data = await apiRequest("/api/deposits");
+    const deposit = (data.items || []).find(item => String(item.payment_code) === activeDepositCode);
+    if (deposit?.status === "paid") {
+      depositSuccessShown = true;
+      clearInterval(depositPollTimer);
+      clearInterval(depositCountdownTimer);
+      await loadCurrentUser();
+      await loadDeposits();
+      showActionAlert(`Bạn nhận được ${money(deposit.amount)} vào tài khoản!`,
+        "NẠP TIỀN THÀNH CÔNG", "Mua gói ngay", () => { location.href = "index.html"; }, "Đóng");
+    }
+  } catch (_) { /* Network hiccup: retry at the next interval. */ }
+}
+
 function startDepositStatusPolling() {
   clearInterval(depositPollTimer);
   if (!activeDepositCode || !getToken()) return;
-  const checkPayment = async () => {
-    if (depositSuccessShown || !activeDepositCode) return;
-    try {
-      const data = await apiRequest("/api/deposits");
-      const deposit = (data.items || []).find(item => String(item.payment_code) === activeDepositCode);
-      if (deposit?.status === "paid") {
-        depositSuccessShown = true;
-        clearInterval(depositPollTimer);
-        clearInterval(depositCountdownTimer);
-        await loadCurrentUser();
-        await loadDeposits();
-        showActionAlert(`Bạn nhận được ${money(deposit.amount)} vào tài khoản!`,
-          "NẠP TIỀN THÀNH CÔNG", "Mua gói ngay", () => { location.href = "index.html"; }, "Đóng");
-      }
-    } catch (_) { /* Network hiccup: retry at the next interval. */ }
-  };
   checkPayment();
   depositPollTimer = setInterval(checkPayment, 3000);
 }
@@ -762,23 +873,32 @@ function startDepositStatusPolling() {
 async function loadDeposits() {
   const host = document.getElementById("deposit-history");
   if (!host) return;
-  if (!getToken()) {
-    host.innerHTML = '<div class="empty-state"><i class="fa-solid fa-lock"></i><h3>Vui lòng đăng nhập</h3><p class="tiny">Đăng nhập để tạo mã nạp và theo dõi lịch sử nạp tiền.</p><a class="btn btn-primary" style="margin-top:8px" href="account.html">Đăng nhập</a></div>';
+  if (!getToken() || !currentUser) {
+    updateDepositAuthUI(null);
     return;
   }
+  updateDepositAuthUI(currentUser);
   try {
     const data = await apiRequest("/api/deposits");
     const items = data.items || [];
     host.innerHTML = items.length
-      ? `<div class="table-wrap"><table class="data-table"><thead><tr><th>Mã nạp</th><th>Số tiền</th><th>Trạng thái</th><th>Thời gian hết hạn</th></tr></thead><tbody>${items.map(d => `<tr><td><strong>${escapeHTML(d.payment_code)}</strong></td><td><strong style="color:var(--brand)">${money(d.amount)}</strong></td><td><span class="status">${escapeHTML(d.status)}</span></td><td class="muted">${escapeHTML(d.expires_at || "")}</td></tr>`).join("")}</tbody></table></div>`
+      ? `<div class="table-wrap"><table class="data-table"><thead><tr><th>Mã nạp</th><th>Số tiền</th><th>Trạng thái</th><th>Thời gian hết hạn</th></tr></thead><tbody>${items.map(d => `<tr><td><strong>${escapeHTML(d.payment_code)}</strong></td><td><strong style="color:var(--brand)">${money(d.amount)}</strong></td><td><span class="status status-${escapeHTML(String(d.status || "").toLowerCase())}">${escapeHTML(statusLabel(d.status))}</span></td><td class="muted">${escapeHTML(d.expires_at || "")}</td></tr>`).join("")}</tbody></table></div>`
       : '<div class="empty-state"><i class="fa-solid fa-receipt"></i><h3>Chưa có giao dịch nạp tiền</h3><p class="tiny">Các yêu cầu nạp tiền của bạn sẽ hiển thị tại đây.</p></div>';
   } catch (error) {
-    host.innerHTML = `<div class="empty-state"><p class="tiny">${escapeHTML(error.message)}</p></div>`;
+    if (!getToken()) {
+      updateDepositAuthUI(null);
+      return;
+    }
+    host.innerHTML = `<div class="empty-state"><i class="fa-solid fa-triangle-exclamation"></i><h3>Không tải được lịch sử nạp</h3><p class="tiny">${escapeHTML(error.message)}</p></div>`;
   }
 }
 
 async function createDeposit(event) {
   event.preventDefault();
+  if (!getToken() || !currentUser) {
+    updateDepositAuthUI(null);
+    return;
+  }
   const form = event.currentTarget;
   const amountDigits = String(form.elements.amount?.value || "").replace(/\D/g, "");
   const amount = Number(amountDigits);
@@ -791,22 +911,6 @@ async function createDeposit(event) {
   if (button) { button.disabled = true; button.textContent = "Đang tạo mã QR..."; }
 
   try {
-    if (!getToken()) {
-      // Allow UI preview if testing without token, or call API if logged in
-      const mockCode = "RD5S" + Math.random().toString(36).substring(2, 8).toUpperCase();
-      showPaymentGatewayView({
-        amount,
-        payment_code: mockCode,
-        transfer_content: mockCode,
-        payment: {
-          bank_name: "Ngân hàng Quân Đội (MB Bank)",
-          bank_short: "MB",
-          account_name: "VU TUNG LAM",
-          account_number: "311435"
-        }
-      });
-      return;
-    }
     const result = await apiRequest("/api/deposits", {
       method: "POST",
       body: JSON.stringify({ amount })
@@ -814,6 +918,10 @@ async function createDeposit(event) {
     showPaymentGatewayView(result);
     await loadDeposits();
   } catch (error) {
+    if (!getToken()) {
+      updateDepositAuthUI(null);
+      return;
+    }
     showCenterAlert(error.message || "Không thể tạo yêu cầu nạp tiền lúc này.", "error", "Không thể tạo mã nạp");
   } finally {
     if (button) { button.disabled = false; button.innerHTML = oldText; }
@@ -845,8 +953,51 @@ function copyText(value) {
 }
 
 document.addEventListener("click", closeNotifications);
+window.addEventListener("storage", async event => {
+  if (event.key === TOKEN_KEY) {
+    if (!getToken()) {
+      stopDepositTimersAndResetGateway();
+      updateAccountUI(null);
+      if (document.getElementById("history-content")) loadHistory();
+    } else {
+      await loadCurrentUser();
+      await refreshPageData();
+    }
+  } else if (event.key === THEME_KEY) {
+    initTheme();
+  initPasswordVisibility();
+  }
+});
+
+function initPasswordVisibility() {
+  document.querySelectorAll('input[type="password"]').forEach(input => {
+    if (input.dataset.visibilityReady) return;
+    input.dataset.visibilityReady = "1";
+    const wrap = document.createElement("div");
+    wrap.className = "password-input-wrap";
+    input.parentNode.insertBefore(wrap, input);
+    wrap.appendChild(input);
+    const toggle = document.createElement("button");
+    toggle.type = "button";
+    toggle.className = "password-visibility-toggle";
+    toggle.setAttribute("aria-label", "Hiện mật khẩu");
+    toggle.setAttribute("aria-pressed", "false");
+    toggle.innerHTML = '<i class="fa-regular fa-eye-slash"></i>';
+    toggle.addEventListener("click", () => {
+      const visible = input.type === "password";
+      input.type = visible ? "text" : "password";
+      toggle.innerHTML = visible ? '<i class="fa-regular fa-eye"></i>' : '<i class="fa-regular fa-eye-slash"></i>';
+      toggle.setAttribute("aria-label", visible ? "Ẩn mật khẩu" : "Hiện mật khẩu");
+      toggle.setAttribute("aria-pressed", String(visible));
+      input.focus();
+    });
+    wrap.appendChild(toggle);
+  });
+}
+
 document.addEventListener("DOMContentLoaded", async () => {
   initTheme();
+  initPasswordVisibility();
   document.querySelectorAll("[data-theme-toggle]").forEach(el => el.addEventListener("click", toggleTheme));
   document.querySelectorAll("[data-notifications]").forEach(el => el.addEventListener("click", toggleNotifications));
   document.querySelectorAll("[data-mark-read]").forEach(el => el.addEventListener("click", markNotificationsRead));
@@ -893,4 +1044,4 @@ document.addEventListener("DOMContentLoaded", async () => {
   await refreshPageData();
 });
 
-window.Random5s = { apiRequest, getToken, setToken, loadCurrentUser, logoutUser, loadPackages, loadHistory, loadDeposits, showCenterAlert };
+window.Random5s = { apiRequest, getToken, setToken, loadCurrentUser, updateAccountUI, updateAccountPanel, logoutUser, loadPackages, loadHistory, loadDeposits, createDeposit, checkPayment, showCenterAlert };

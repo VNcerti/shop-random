@@ -1,0 +1,21 @@
+# Python backend
+main.py
+__pycache__/
+*.pyc
+*.pyo
+
+# Files excluded from upload
+manifest.json
+README-CAP-NHAT.txt
+README.txt
+assets/img/
+
+# Environment
+.env
+.venv/
+venv/
+
+# System
+.DS_Store
+.idea/
+.vscode/

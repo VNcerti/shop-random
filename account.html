@@ -10,7 +10,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-  <link rel="stylesheet" href="assets/style.css">
+  <link rel="stylesheet" href="assets/style.css?v=20261101-account5">
   <script>try{if(localStorage.getItem('random5s_theme')==='dark')document.documentElement.classList.add('dark')}catch(e){}</script>
 </head>
 <body>
@@ -81,14 +81,14 @@
       </button>
     </form>
 
-    <form id="register-form" class="hidden">
+    <form id="register-form" class="hidden" novalidate>
       <div class="form-field">
         <label for="register-username">Tên đăng nhập mới</label>
-        <input id="register-username" name="username" minlength="3" maxlength="40" required placeholder="Từ 3–40 ký tự viết liền">
+        <input id="register-username" name="username" maxlength="40" required placeholder="Ví dụ: Random5s" autocomplete="username" autocapitalize="off" spellcheck="false">
       </div>
       <div class="form-field">
         <label for="register-password">Mật khẩu bảo mật</label>
-        <input id="register-password" name="password" type="password" minlength="10" required placeholder="Tối thiểu 10 ký tự">
+        <input id="register-password" name="password" type="password" required placeholder="Tối thiểu 6 ký tự" autocomplete="new-password">
       </div>
     <div class="policy-consent">
       <label for="register-terms">
@@ -142,6 +142,6 @@
   </div>
 </footer>
 <div id="toast" class="toast hidden"></div>
-<script src="assets/app.js" defer></script>
+<script src="assets/app.js?v=20261101-account5" defer></script>
 </body>
 </html>

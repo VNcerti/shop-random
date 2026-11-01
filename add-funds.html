@@ -10,8 +10,8 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-  <link rel="stylesheet" href="assets/style.css">
-  <script>try{if(localStorage.getItem('random5s_theme')==='dark')document.documentElement.classList.add('dark')}catch(e){}</script>
+  <link rel="stylesheet" href="assets/style.css?v=20261101-4">
+  <script>try{if(localStorage.getItem('random5s_theme')==='dark')document.documentElement.classList.add('dark');document.documentElement.classList.add(localStorage.getItem('random5s_token')?'has-token':'no-token')}catch(e){}</script>
 </head>
 <body>
 <header class="site-header">
@@ -49,41 +49,64 @@
   <a class="active" href="add-funds.html"><i class="fa-solid fa-wallet"></i><span>Nạp tiền</span></a>
   <a class="" href="account.html"><i class="fa-solid fa-user"></i><span>Tài khoản</span></a>
 </nav>
-<main class="container main page-stack">
+<main class="container main page-stack deposit-page-main">
 
-  <!-- BƯỚC 1: KHUNG TẠO YÊU CẦU NẠP TIỀN (Sẽ biến mất ngay khi bấm Tạo mã nạp) -->
-  <section id="deposit-create-section" class="panel deposit-create-wrap">
-    <h2 class="section-title">Tạo yêu cầu nạp tiền</h2>
+  <!-- TRẠNG THÁI CHƯA ĐĂNG NHẬP: Chỉ hiển thị duy nhất khung yêu cầu đăng nhập -->
+  <section id="deposit-guest-prompt" class="panel deposit-section-card deposit-auth-prompt hidden" aria-live="polite">
+    <div class="empty-state auth-prompt-state">
+      <div class="auth-prompt-icon">
+        <i class="fa-solid fa-lock"></i>
+      </div>
+      <h2 class="auth-prompt-title">Vui lòng đăng nhập</h2>
+      <p class="auth-prompt-desc">Đăng nhập để tạo mã nạp và theo dõi lịch sử nạp tiền.</p>
+      <a class="btn btn-primary auth-prompt-btn" href="account.html">
+        <i class="fa-solid fa-right-to-bracket"></i> Đăng nhập
+      </a>
+    </div>
+  </section>
 
-    <form id="deposit-form" style="margin-top:12px">
+  <!-- BƯỚC 1: KHUNG TẠO YÊU CẦU NẠP TIỀN (Ẩn hoàn toàn khi chưa đăng nhập hoặc khi đang hiển thị Gateway) -->
+  <section id="deposit-create-section" class="panel deposit-section-card deposit-create-wrap hidden">
+    <div class="deposit-card-head">
+      <div class="section-kicker">Nạp số dư tự động 24/7</div>
+      <h2 class="section-title">Tạo yêu cầu nạp tiền</h2>
+    </div>
+
+    <form id="deposit-form" class="deposit-form-layout">
       <div class="form-field">
         <label for="deposit-amount">Số tiền muốn nạp (VND)</label>
         <input id="deposit-amount" name="amount" type="text" inputmode="numeric" autocomplete="off" required placeholder="Ví dụ: 10.000đ" class="deposit-amount-input" aria-describedby="deposit-amount-help">
       </div>
 
-      <div class="quick-amounts">
+      <div class="quick-amounts" role="group" aria-label="Chọn nhanh mệnh giá nạp">
         <button type="button" class="quick-amount-btn" data-quick-amount="10000">10.000đ</button>
         <button type="button" class="quick-amount-btn" data-quick-amount="25000">25.000đ</button>
         <button type="button" class="quick-amount-btn" data-quick-amount="50000">50.000đ</button>
         <button type="button" class="quick-amount-btn" data-quick-amount="100000">100.000đ</button>
       </div>
 
-      <p id="deposit-amount-help" class="tiny muted" style="margin:6px 0 14px">
-        <i class="fa-solid fa-circle-info" style="color:var(--brand)"></i> Nạp tối thiểu 10.000đ. Có thể nhập số tiền bất kỳ.
+      <p id="deposit-amount-help" class="deposit-help-note">
+        <i class="fa-solid fa-circle-info"></i>
+        <span>Vui lòng nạp tối thiểu 10.000đ.</span>
       </p>
 
-      <button class="btn btn-primary btn-block" type="submit">
-        <i class="fa-solid fa-qrcode"></i> Tạo mã nạp
-      </button>
+      <div class="deposit-submit-row">
+        <button class="btn btn-primary btn-block" type="submit">
+          <i class="fa-solid fa-qrcode"></i> Tạo mã nạp
+        </button>
+      </div>
     </form>
   </section>
 
   <!-- BƯỚC 2: GIAO DIỆN CỔNG THANH TOÁN TỰ ĐỘNG 24/7 (Thay thế khung tạo yêu cầu khi bấm nút) -->
   <section id="deposit-gateway-section" class="hidden"></section>
 
-  <!-- LỊCH SỬ NẠP TIỀN -->
-  <section class="panel">
-    <h3 class="section-title" style="margin-bottom:12px">Lịch sử nạp tiền</h3>
+  <!-- LỊCH SỬ NẠP TIỀN (Ẩn khi chưa đăng nhập để trang chỉ hiển thị duy nhất 1 khung Vui lòng đăng nhập) -->
+  <section id="deposit-history-section" class="panel deposit-section-card hidden">
+    <div class="deposit-card-head">
+      <div class="section-kicker">Giao dịch gần đây</div>
+      <h2 class="section-title">Lịch sử nạp tiền</h2>
+    </div>
     <div id="deposit-history">
       <div class="empty-state">
         <i class="fa-solid fa-spinner fa-spin"></i>
@@ -130,6 +153,6 @@
   </div>
 </footer>
 <div id="toast" class="toast hidden"></div>
-<script src="assets/app.js" defer></script>
+<script src="assets/app.js?v=20261101-4" defer></script>
 </body>
 </html>
